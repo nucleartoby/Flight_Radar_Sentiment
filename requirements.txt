@@ -1,0 +1,7 @@
+yfinance
+geopy
+sklearn
+xgboost
+lightgbm
+logging
+joblib
