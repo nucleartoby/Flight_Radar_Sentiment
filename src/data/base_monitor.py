@@ -13,12 +13,9 @@ class BaseMonitor:
         self.military_callsigns = Config.MILITARY_CALLSIGNS
 
     def load_bases(self) -> List[Dict]:
-        try:
             with open('config/military_bases.json', 'r') as f:
                 data = json.load(f)
                 return data['military_bases']
-        except Exception as e:
-            self.logger.error(f"Error loading bases; {e}")
             return []
         
     def is_near_base(self, aircraft_lat: float, aircraft_lon: float) -> Tuple[bool, str]:
