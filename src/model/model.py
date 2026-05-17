@@ -11,11 +11,11 @@ import logging
 from typing import Dict, Tuple, Any, Optional
 from config.settings import Config
 
+
 class OilPricePredictor:
     
     def __init__(self):
-        self.models = {
-            'xgboost': xgb.XGBRegressor(
+        self.models = {'xgboost': xgb.XGBRegressor(
                 n_estimators=1000,
                 learning_rate=0.03,
                 max_depth=6,
@@ -27,8 +27,7 @@ class OilPricePredictor:
                 random_state=Config.RANDOM_STATE,
                 early_stopping_rounds=50,
                 objective='reg:squarederror',
-                eval_metric='rmse'
-            ),
+                eval_metric='rmse'),
             'lightgbm': lgb.LGBMRegressor(
                 n_estimators=1000,
                 learning_rate=0.03,
@@ -51,11 +50,13 @@ class OilPricePredictor:
         self.scaler = RobustScaler()
         self.logger = logging.getLogger(__name__)
     
+
     def add_lagged_features(self, df: pd.DataFrame, col: str, max_lag: int = 10) -> pd.DataFrame:
         for lag in range(1, max_lag + 1):
             df[f"{col}_lag_{lag}"] = df[col].shift(lag)
         return df
     
+
     def add_rolling_features(self, df: pd.DataFrame, col: str, 
                            windows: Tuple[int, ...] = (5, 10, 20)) -> pd.DataFrame:
         for w in windows:
@@ -64,6 +65,7 @@ class OilPricePredictor:
             df[f"{col}_roll_vol_{w}"] = df[col].rolling(w).std() / df[col].rolling(w).mean()
         return df
     
+
     def prepare_data(self, features: pd.DataFrame, 
                      target_column: str = 'bz_price',
                      signal_col: str = 'uncertainty_index',
@@ -82,8 +84,8 @@ class OilPricePredictor:
         X = X_df.values
         return X, y, df
     
-    def train_models(self, X: np.ndarray, y: np.ndarray, 
-                     df: pd.DataFrame, verbose: bool = True) -> Dict[str, Dict]:
+
+    def train_models(self, X: np.ndarray, y: np.ndarray, df: pd.DataFrame, verbose: bool = True) -> Dict[str, Dict]:
         n = len(X)
         split_idx = int(n * Config.TRAIN_TEST_SPLIT)
         X_train, X_test = X[:split_idx], X[split_idx:]
@@ -105,25 +107,17 @@ class OilPricePredictor:
                 if name == 'xgboost':
                     dtrain = xgb.DMatrix(X_train_scaled[train_idx], label=y_train[train_idx])
                     dval = xgb.DMatrix(X_train_scaled[val_idx], label=y_train[val_idx])
-                    cv_model = xgb.train(
-                        model.get_params(),
-                        dtrain,
-                        num_boost_round=1000,
-                        evals=[(dval, 'val')],
-                        early_stopping_rounds=50,
-                        verbose_eval=False
-                    )
+                    cv_model = xgb.train(model.get_params(),dtrain, num_boost_round=1000,
+                        evals=[(dval, 'val')],early_stopping_rounds=50, verbose_eval=False)
+                    
                     best_iter = cv_model.best_iteration
+
                 else:  # LightGBM
                     train_data = lgb.Dataset(X_train_scaled[train_idx], label=y_train[train_idx])
                     val_data = lgb.Dataset(X_train_scaled[val_idx], label=y_train[val_idx])
-                    cv_model = lgb.train(
-                        model.params,
-                        train_data,
-                        num_boost_round=1000,
-                        valid_sets=[val_data],
-                        callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)]
-                    )
+                    cv_model = lgb.train(model.params, train_data, num_boost_round=1000, valid_sets=[val_data],
+                                         callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)])
+                    
                     best_iter = cv_model.best_iteration
                 
                 cv_pred = cv_model.predict(X_train_scaled[val_idx], num_iteration=cv_model.best_iteration)
@@ -178,6 +172,7 @@ class OilPricePredictor:
         self.logger.info(f"Best model: {best_name} (Test RMSE: {results[best_name]['test_rmse']:.4f})")
         return results
     
+
     def predict(self, X: np.ndarray) -> np.ndarray:
         if self.best_model is None:
             raise ValueError("Model not trained yet")
@@ -189,25 +184,20 @@ class OilPricePredictor:
         else:
             return self.best_model.predict(X_scaled)
     
+
     def feature_importance_df(self, feature_names: list) -> pd.DataFrame:
         if self.feature_importance is None:
             return None
-        imp_df = pd.DataFrame({
-            'feature': feature_names,
-            'importance': self.feature_importance
-        }).sort_values('importance', ascending=False)
+        imp_df = pd.DataFrame({'feature': feature_names,'importance': self.feature_importance}).sort_values('importance', ascending=False)
         return imp_df
     
+
     def save_model(self, filepath: str):
         if self.best_model is None:
             raise ValueError("No model to save")
         
-        model_data = {
-            'model_name': self.best_model_name,
-            'model': self.best_model,
-            'scaler': self.scaler,
-            'feature_importance': self.feature_importance
-        }
+        model_data = {'model_name': self.best_model_name,'model': self.best_model,'scaler': self.scaler,'feature_importance': self.feature_importance}
+        
         joblib.dump(model_data, filepath)
         self.logger.info(f"Model saved to {filepath}")
     
