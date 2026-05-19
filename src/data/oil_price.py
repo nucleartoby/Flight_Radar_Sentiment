@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from typing import Dict, List
+from typing import Dict
 from config.settings import Config
 
 class OilPriceCollector:
@@ -22,8 +22,8 @@ class OilPriceCollector:
         return prices
 
     def fetch_historical_data(self, days: int = 30) -> pd.DataFrame:
-        end_data = datetime.now()
-        start_date = end_data - timedelta(days=days)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
 
         data_frames = []
         for symbol in self.symbols:
