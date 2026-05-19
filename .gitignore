@@ -4,5 +4,5 @@ config/__pycache__
 data
 logs
 src/data/__pycache__
-src/features_engineering/__pycache__
+src/feature_engineering/__pycache__
 src/model/__pycache__
