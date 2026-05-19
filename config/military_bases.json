@@ -1,0 +1,85 @@
+{
+  "military_bases": [
+    {
+      "name": "Al Udeid Air Base",
+      "country": "Qatar",
+      "latitude": 25.1173,
+      "longitude": 51.3150,
+      "type": "air_base",
+      "operator": "USAF/Qatar Air Force",
+      "notes": "Largest US air base in Middle East, home of AFCENT"
+    },
+    {
+      "name": "NSA Bahrain (5th Fleet)",
+      "country": "Bahrain",
+      "latitude": 26.2285,
+      "longitude": 50.5861,
+      "type": "naval_base",
+      "operator": "US Navy",
+      "notes": "HQ of US 5th Fleet, primary naval base in Gulf"
+    },
+    {
+      "name": "Al Dhafra Air Base",
+      "country": "UAE",
+      "latitude": 24.2486,
+      "longitude": 54.5479,
+      "type": "air_base",
+      "operator": "USAF/UAE Air Force",
+      "notes": "Key ISR and refuelling hub"
+    },
+    {
+      "name": "Al Asad Air Base",
+      "country": "Iraq",
+      "latitude": 33.7856,
+      "longitude": 42.4414,
+      "type": "air_base",
+      "operator": "US Army/Iraqi Air Force",
+      "notes": "Major coalition base in western Iraq"
+    },
+    {
+      "name": "Camp Arifjan",
+      "country": "Kuwait",
+      "latitude": 29.1986,
+      "longitude": 48.1139,
+      "type": "army_base",
+      "operator": "US Army",
+      "notes": "Primary Army logistics hub in Kuwait"
+    },
+    {
+      "name": "Al Tanf Garrison",
+      "country": "Syria",
+      "latitude": 33.5258,
+      "longitude": 38.6397,
+      "type": "garrison",
+      "operator": "US Army",
+      "notes": "Strategically located near Iraq-Syria-Jordan border"
+    },
+    {
+      "name": "Ali Al Salem Air Base",
+      "country": "Kuwait",
+      "latitude": 29.3467,
+      "longitude": 47.5194,
+      "type": "air_base",
+      "operator": "USAF/Kuwait Air Force",
+      "notes": "Forward operating base in Kuwait"
+    },
+    {
+      "name": "Camp Buehring",
+      "country": "Kuwait",
+      "latitude": 29.6278,
+      "longitude": 47.6514,
+      "type": "army_base",
+      "operator": "US Army",
+      "notes": "Training and staging base in Kuwait"
+    },
+    {
+      "name": "Al Harir (Erbil) Air Base",
+      "country": "Iraq",
+      "latitude": 36.2375,
+      "longitude": 43.9637,
+      "type": "air_base",
+      "operator": "US Army/Peshmerga",
+      "notes": "Key base in northern Iraq / Kurdistan Region"
+    }
+  ]
+}
