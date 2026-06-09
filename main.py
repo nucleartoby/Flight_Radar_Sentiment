@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from pathlib import Path
 
-from src.data.opensky_api import OpenSkyAPICollector
+from src.data.flightradar_api import FlightRadarCollector
 from src.data.oil_price import OilPriceCollector
 from src.data.base_monitor import BaseMonitor
 from src.feature_engineering.features import FeatureEngineer
@@ -33,55 +33,71 @@ def setup_logging() -> logging.Logger:
 
 
 def create_directories():
-    for path in ["data/raw/flight_data","data/raw/oil_prices","data/processed","models","logs",]:
+    for path in ["data/raw/flight_data", "data/raw/oil_prices","data/raw/fr24", "data/processed", "models", "logs",]:
         Path(path).mkdir(parents=True, exist_ok=True)
 
 
-
 def collect_flights(logger: logging.Logger):
-    logger.info("Connecting to OpenSky Network…")
-    collector = OpenSkyAPICollector()
+    logger.info("Connecting to FlightRadar24…")
+    collector = FlightRadarCollector()
 
     status = collector.get_api_status()
-    auth_label = status.get("auth_method", "anonymous")
-    logger.info(f"OpenSky status: {status.get('api_accessible')} ({auth_label})")
+    logger.info(f"FR24 status: {status.get('api_accessible')} ({status.get('auth_method', 'anonymous')})")
 
     if not status.get("api_accessible"):
-        logger.warning("OpenSky API not reachable, skipping live collection.")
+        logger.warning("FlightRadar24 not reachable — skipping live collection.")
         collector.close()
         return [], 0
 
     all_flights = collector.get_middle_east_flights()
-    logger.info(f"Retrieved {len(all_flights)} total flights in region.")
+    logger.info(f"Retrieved {len(all_flights)} aircraft in region.")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    raw_path = f"data/raw/fr24/raw_{ts}.csv"
+    pd.DataFrame(all_flights).to_csv(raw_path, index=False)
+    logger.info(f"Raw snapshot saved - {raw_path}")
 
     monitor = BaseMonitor()
-
     for flight in all_flights:
-        near, base_name = monitor.is_near_base(flight.get("latitude", 0), flight.get("longitude", 0))
-        flight["near_base"] = near
-        flight["base_name"] = base_name if near else "None"
-        flight["is_military"] = collector._is_military_flight(flight)
+        nearby = monitor.find_nearest_base(
+            flight.get("latitude", 0), flight.get("longitude", 0)
+        )
+        flight["near_base"] = nearby is not None
+        flight["base_name"] = nearby["name"] if nearby else "None"
+        flight["base_type"] = nearby.get("type", "") if nearby else ""
+        flight["base_priority"] = nearby.get("priority", 0) if nearby else 0
+
+        result = collector.classify_flight(flight)
+        flight.update(result)
         flight["total_flights_in_snapshot"] = len(all_flights)
 
-    military = [f for f in all_flights if f.get("is_military")]
-    logger.info(f"Military / government: {len(military)} of {len(all_flights)} "f"({100 * len(military) / max(len(all_flights), 1):.1f}%)")
+    classified_path = f"data/raw/fr24/classified_{ts}.csv"
+    pd.DataFrame(all_flights).to_csv(classified_path, index=False)
+    logger.info(f"Classified snapshot saved - {classified_path}")
+
+    tracked = [f for f in all_flights if f.get("classification") != "likely_civilian"]
+    lm = sum(1 for f in tracked if f.get("classification") == "likely_military")
+    gl = sum(1 for f in tracked if f.get("classification") == "gov_logistics")
+    unk = len(tracked) - lm - gl
+    logger.info(f"Tracked: {len(tracked)} of {len(all_flights)} "f"(likely_military={lm}, gov_logistics={gl}, unknown={unk})")
 
     collector.close()
-    return military, len(all_flights)
+    return tracked, len(all_flights)
 
 
-def save_flight_snapshot(military: list, total: int, logger: logging.Logger):
-    if not military:
-        logger.info(f"No military aircraft to save (total in region: {total}).")
+def save_flight_snapshot(tracked: list, total: int, logger: logging.Logger):
+    if not tracked:
+        logger.info(f"No tracked aircraft to save (total in region: {total}).")
         return
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = f"data/raw/flight_data/flights_{ts}.csv"
-    pd.DataFrame(military).to_csv(path, index=False)
-    logger.info(f"Saved {len(military)} military records {path}")
+    pd.DataFrame(tracked).to_csv(path, index=False)
+    logger.info(f"Saved {len(tracked)} tracked records - {path}")
 
 
 def collect_oil_prices(logger: logging.Logger) -> pd.DataFrame:
-    logger.info("Fetching historical oil prices (365 days)…")
+    logger.info("Fetching historical oil prices")
     collector = OilPriceCollector()
     df = collector.fetch_historical_data(days=365)
 
@@ -172,7 +188,7 @@ def train_and_evaluate(combined: pd.DataFrame, logger: logging.Logger):
 
     model_path = f"models/oil_predictor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
     predictor.save_model(model_path)
-    logger.info(f"Best model ({predictor.best_model_name}) saved -> {model_path}")
+    logger.info(f"Best model ({predictor.best_model_name}) saved - {model_path}")
 
     return predictor, results
 
@@ -202,40 +218,95 @@ def plot_uncertainty_index(flight_features: pd.DataFrame, logger: logging.Logger
     plt.show()
 
 
+_CATEGORY_LABELS = {
+    0: "No info",
+    1: "No ADS-B info",
+    2: "Light",
+    3: "Small",
+    4: "Large",
+    5: "High-Vortex Large",
+    6: "Heavy",
+    7: "High-Performance",
+    8: "Rotorcraft",
+    9: "Glider",
+    14: "UAV",
+    15: "Space/Trans-atm",
+    16: "Surface Emergency",
+    18: "Obstacle",}
+
+
+def _best_type_label(f: dict) -> tuple:
+    """
+    Return (typecode_str, model_str) using the best available data.
+    Priority: confirmed metadata > tracked-type name > category label > ICAO block.
+    """
+    typecode = (f.get("aircraft_type") or "").strip().upper()
+    model = (f.get("aircraft_model") or "").strip()
+
+    if typecode and model:
+        return typecode, model
+
+    if typecode:
+        # Typecode known but no model string look up in TRACKED_AIRCRAFT_TYPES
+        info = Config.TRACKED_AIRCRAFT_TYPES.get(typecode)
+        return typecode, (info["name"] if info else "")
+
+    # No metadata yet derive best label from category and ICAO block
+    category = f.get("category")
+    cat_label = _CATEGORY_LABELS.get(category, "") if category is not None else ""
+
+    icao24 = (f.get("icao24") or "").upper()
+    prefix = icao24[:2] if len(icao24) >= 2 else ""
+    us_mil = prefix in Config.ICAO_BLOCK_WEIGHTS
+
+    if cat_label and us_mil:
+        return "?", f"US-Mil / {cat_label}"
+    if cat_label:
+        return "?", cat_label
+    if us_mil:
+        return "?", "US Military block"
+    return "?", "---"
+
+
 def print_military_aircraft(flights: list):
     military = [f for f in flights if f.get("is_military")]
 
-    divider = "=" * 80
-    print(f"\n{divider}")
-    print(f"  MILITARY / GOVERNMENT AIRCRAFT IN MIDDLE EAST REGION")
-    print(divider)
+    div = "=" * 105
+    print(f"\n{div}")
+    print(f"  MILITARY / GOVERNMENT AIRCRAFT  —  MIDDLE EAST REGION")
+    print(div)
 
     if not military:
         print(f"  No military or government aircraft identified in this snapshot.")
-        print(f"  ({len(flights)} total civilian aircraft tracked in region)")
-    else:
-        print(f"  {'CALLSIGN':<12} {'ICAO24':<8} {'COUNTRY':<22} {'ALT (m)':<10} "
-              f"{'SPD (kt)':<10} {'NEAR BASE':<28} {'REASON'}")
-        print("-" * 80)
+        print(f"  ({len(flights)} total civilian aircraft in region)")
+        print(f"{div}\n")
+        return
 
-        for f in sorted(military, key=lambda x: x.get("callsign") or ""):
-            callsign = (f.get("callsign") or "N/A").strip()[:11]
-            icao24 = (f.get("icao24")   or "N/A")[:7]
-            country = (f.get("origin_country") or "N/A")[:21]
-            alt = f.get("altitude")
-            spd = f.get("speed")
-            base = f.get("base_name") or "None"
-            reason = (f.get("military_reason") or "Pattern match")[:30]
+    military_sorted = sorted(
+        military, key=lambda x: x.get("classification_score", 0), reverse=True)
 
-            alt_str = f"{int(alt):,}" if alt is not None else "---"
-            spd_str = f"{int(spd)}"   if spd is not None else "---"
+    print(f"  {'CALLSIGN':<10} {'ICAO24':<8} {'CODE':<6} {'AIRCRAFT TYPE':<30} "
+          f"{'CLASSIFICATION':<16} {'SCR':>4}  {'ALT ft':<9} {'NEAR BASE'}")
+    print("-" * 105)
 
-            print(f"  {callsign:<12} {icao24:<8} {country:<22} {alt_str:<10} "
-                  f"{spd_str:<10} {base:<28} {reason}")
+    for f in military_sorted:
+        callsign = (f.get("callsign") or "---").strip()[:9]
+        icao24 = (f.get("icao24")   or "---")[:7]
+        score = f.get("classification_score", 0)
+        cls = (f.get("classification") or "")[:15]
+        alt = f.get("baro_altitude") or f.get("altitude")
+        base = (f.get("base_name") or "---")[:28]
 
-        print(f"\n  {len(military)} military/government  |  {len(flights)} total in region")
+        typecode, type_label = _best_type_label(f)
+        alt_str = f"{int(alt * 3.281):,} ft" if alt else "---"
 
-    print(f"{divider}\n")
+        print(f"  {callsign:<10} {icao24:<8} {typecode:<6} {type_label:<30} "
+              f"{cls:<16} {score:>4}  {alt_str:<9} {base}")
+
+    confirmed = sum(1 for f in military if f.get("aircraft_type"))
+    print(f"\n  {len(military)} tracked  |  {len(flights)} total in region  |  "
+          f"{confirmed} type-confirmed via metadata")
+    print(f"{div}\n")
 
 
 def main():
@@ -256,9 +327,7 @@ def main():
     oil_data, flight_data = load_accumulated_data(logger)
 
     # 4. Features
-    flight_features, _, combined = build_features(
-        flight_data, oil_data, logger
-    )
+    flight_features, _, combined = build_features(flight_data, oil_data, logger)
 
     # 5. Train (only if enough data)
     if not combined.empty:
