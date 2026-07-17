@@ -40,8 +40,7 @@ class FeatureEngineer:
             'Al Tanf Garrison': 0.7,
             'Ali Al Salem Air Base': 0.6,
             'Camp Buehring': 0.6,
-            'Al Harir (Erbil) Air Base': 0.5
-        }
+            'Al Harir (Erbil) Air Base': 0.5}
 
         weighted_activity = pd.Series(0.0, index=base_activity.index)
         for base, weight in importance_weights.items():
