@@ -5,12 +5,9 @@ load_dotenv()
 
 
 class Config:
-    # ── FlightRadar24 credentials ─────────────────────────────────────────────
-    FR24_EMAIL    = os.getenv('FR24_EMAIL',    '')
+    # FlightRadar24 credentials
+    FR24_EMAIL    = os.getenv('FR24_EMAIL', '')
     FR24_PASSWORD = os.getenv('FR24_PASSWORD', '')
-
-    ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '')
-    DATABASE_URL          = os.getenv('DATABASE_URL', 'sqlite:///military_oil_predictor.db')
 
     REQUEST_DELAY = 2
     MAX_RETRIES   = 3
