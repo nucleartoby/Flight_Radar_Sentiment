@@ -12,6 +12,7 @@ class FeatureEngineer:
         flight_data['is_weekend'] = flight_data['day_of_week'].isin([5, 6]).astype(int)
 
         time_windows = ['1h', '6h', '12h', '24h']
+        has_classification = 'classification' in flight_data.columns
 
         for window in time_windows:
             grouped = flight_data.groupby(pd.Grouper(key='timestamp', freq=window))
@@ -27,6 +28,14 @@ class FeatureEngineer:
             features[f'military_count_{window}'] = mil_grouped.size()
             features[f'military_ratio_{window}'] = (mil_grouped.size() / grouped.size()).fillna(0)
 
+            if has_classification:
+                logistics_flights = flight_data[flight_data['classification'] == 'gov_logistics']
+                logistics_grouped = logistics_flights.groupby(pd.Grouper(key='timestamp', freq=window))
+                features[f'logistics_count_{window}'] = logistics_grouped.size()
+            else:
+                features[f'logistics_count_{window}'] = 0
+
+        # Per base activity detect concentration
         base_activity = flight_data.groupby(['timestamp', 'base_name']).size().unstack(fill_value=0)
         for base in base_activity.columns:
             features[f'{base.lower().replace(" ", "_")}_activity'] = base_activity[base]
@@ -48,6 +57,17 @@ class FeatureEngineer:
                 weighted_activity += base_activity[base] * weight
 
         features['weighted_strategic_activity'] = weighted_activity
+
+        # Base concentration index share of total military activity at single base
+        # localised events low concentration + broad activity growth
+        base_cols = [c for c in features.columns if c.endswith('_activity')
+                     and c != 'weighted_strategic_activity']
+        if base_cols:
+            base_totals = features[base_cols]
+            row_sum = base_totals.sum(axis=1).replace(0, np.nan)
+            features['max_base_share'] = (base_totals.max(axis=1) / row_sum).fillna(0)
+        else:
+            features['max_base_share'] = 0.0
 
         return features.fillna(0)
 
@@ -110,18 +130,74 @@ class FeatureEngineer:
 
         return (composite * 100).clip(0, 100).rename('uncertainty_index')
 
+    # Event type segmentation no single unified index
+    def build_event_features(self, flight_features: pd.DataFrame,
+                              z_threshold: float = 2.0,
+                              concentration_threshold: float = 0.6,
+                              breadth_threshold: float = 0.5,
+                              buildup_window: int = 3) -> pd.DataFrame:
+        df = flight_features.copy()
+        events = pd.DataFrame(index=df.index)
+
+        total_mil = df.get('military_count_24h', pd.Series(0.0, index=df.index)).astype(float)
+        max_base_share = df.get('max_base_share', pd.Series(0.0, index=df.index)).astype(float)
+        unique_bases = df.get('unique_bases_24h', pd.Series(0.0, index=df.index)).astype(float)
+        weighted_activity = df.get('weighted_strategic_activity', pd.Series(0.0, index=df.index)).astype(float)
+        logistics_count = df.get('logistics_count_24h', pd.Series(0.0, index=df.index)).astype(float)
+
+        # Strike kinetic proxy
+        # Sharp single day spike in total military activity on localised base
+        mil_roll_mean = total_mil.shift(1).rolling(14, min_periods=3).mean()
+        mil_roll_std = total_mil.shift(1).rolling(14, min_periods=3).std().replace(0, np.nan)
+        mil_z = (total_mil - mil_roll_mean) / mil_roll_std
+        events['strike_zscore'] = mil_z.fillna(0)
+        events['event_strike_flag'] = ((mil_z.fillna(0) > z_threshold) & (max_base_share > concentration_threshold)).astype(int)
+
+        # Troop movement logistics buildup proxy
+        # Sustained rise in govlogisticsclassified flights with window
+        logistics_roll = logistics_count.shift(1).rolling(buildup_window, min_periods=1).mean()
+        logistics_baseline = logistics_count.shift(1).rolling(21, min_periods=5).mean()
+        buildup_ratio = (logistics_roll / logistics_baseline.replace(0, np.nan)).fillna(0)
+        events['troop_buildup_ratio'] = buildup_ratio
+        events['event_troop_buildup_flag'] = (buildup_ratio > 1.5).astype(int)
+
+        # Base surge proxy
+        # Activity across multi base
+        breadth_norm = (unique_bases / 9).clip(0, 1)
+        weighted_roll_mean = weighted_activity.shift(1).rolling(14, min_periods=3).mean()
+        weighted_roll_std = weighted_activity.shift(1).rolling(14, min_periods=3).std().replace(0, np.nan)
+        weighted_z = ((weighted_activity - weighted_roll_mean) / weighted_roll_std).fillna(0)
+        events['base_surge_zscore'] = weighted_z
+        events['event_base_surge_flag'] = ((breadth_norm > breadth_threshold) & (weighted_z > z_threshold * 0.75)).astype(int)
+
+        events['event_any_flag'] = (
+            events['event_strike_flag']
+            | events['event_troop_buildup_flag']
+            | events['event_base_surge_flag']).astype(int)
+
+        return events.fillna(0)
+
     def combine_features(self, flight_features: pd.DataFrame, oil_features: pd.DataFrame) -> pd.DataFrame:
         ff = flight_features.copy()
         of = oil_features.copy()
         ff.index = pd.to_datetime(ff.index).normalize().tz_localize(None)
         of.index = pd.to_datetime(of.index).normalize().tz_localize(None)
 
+        event_features = self.build_event_features(ff)
+        ff = pd.concat([ff, event_features], axis=1)
+
         combined = pd.merge(ff, of, left_index=True, right_index=True, how='inner')
 
         combined['flight_oil_interaction'] = (combined['military_count_24h'] * combined['bz_volatility'])
 
+        # Event type interactions with oil volatility
+        combined['strike_oil_interaction'] = (combined['event_strike_flag'] * combined['bz_volatility'])
+        combined['troop_buildup_oil_interaction'] = (combined['event_troop_buildup_flag'] * combined['bz_volatility'])
+        combined['base_surge_oil_interaction'] = (combined['event_base_surge_flag'] * combined['bz_volatility'])
+
         lag_periods = [1, 2, 3, 5]
         for period in lag_periods:
             combined[f'military_activity_lag_{period}'] = (combined['military_count_24h'].shift(period))
+            combined[f'event_any_flag_lag_{period}'] = (combined['event_any_flag'].shift(period))
 
         return combined.fillna(0)
