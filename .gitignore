@@ -1,7 +1,7 @@
 CLAUDE.md
 credentials.json
 config/__pycache__
-data
+/data
 logs
 src/data/__pycache__
 src/feature_engineering/__pycache__
