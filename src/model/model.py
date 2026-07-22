@@ -28,8 +28,8 @@ class OilPricePredictor:
                 random_state=Config.RANDOM_STATE,
                 early_stopping_rounds=50,
                 objective='reg:squarederror',
-                eval_metric='rmse'
-            ),
+                eval_metric='rmse'),
+
             'lightgbm': lgb.LGBMRegressor(
                 n_estimators=1000,
                 learning_rate=0.03,
@@ -58,12 +58,15 @@ class OilPricePredictor:
         return df
 
 
-    def add_rolling_features(self, df: pd.DataFrame, col: str,
-                              windows: Tuple[int, ...] = (5, 10, 20)) -> pd.DataFrame:
+    def add_rolling_features(self, df: pd.DataFrame, col: str, windows: Tuple[int, ...] = (5, 10, 20)) -> pd.DataFrame:
+        shifted = df[col].shift(1)
         for w in windows:
-            df[f"{col}_roll_mean_{w}"] = df[col].rolling(w).mean()
-            df[f"{col}_roll_std_{w}"] = df[col].rolling(w).std()
-            df[f"{col}_roll_vol_{w}"] = df[col].rolling(w).std() / df[col].rolling(w).mean()
+            roll_mean = shifted.rolling(w).mean()
+            roll_std = shifted.rolling(w).std()
+            df[f"{col}_roll_mean_{w}"] = roll_mean
+            df[f"{col}_roll_std_{w}"] = roll_std
+            df[f"{col}_roll_vol_{w}"] = roll_std / roll_mean
+            
         return df
 
 
