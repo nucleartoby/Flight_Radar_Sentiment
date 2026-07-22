@@ -12,7 +12,7 @@ from scipy import stats
 from statsmodels.tsa.stattools import grangercausalitytests, adfuller
 
 
-MAX_LAG = 10
+MAX_LAG = 15
 PRICE_COL = "bz_price"
 DATA_PATH = "data/processed/combined_features.csv"
 OUT_DIR = Path("data/processed/diagnostics/segmented")
