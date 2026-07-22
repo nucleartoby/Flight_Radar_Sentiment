@@ -135,6 +135,7 @@ def build_features(flight_data: pd.DataFrame,oil_data: pd.DataFrame,logger: logg
         logger.info("Engineering flight features…")
         flight_features = fe.create_flight_features(flight_data)
         uncertainty = fe.build_uncertainty_index(flight_features)
+        event_features = fe.build_event_features(flight_features)
         flight_features["uncertainty_index"] = uncertainty
         logger.info(f"Uncertainty index — mean: {uncertainty.mean():.1f}, "f"max: {uncertainty.max():.1f}, min: {uncertainty.min():.1f}")
         flight_features.to_csv("data/processed/flight_features.csv")
