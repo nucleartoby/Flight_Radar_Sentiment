@@ -170,3 +170,16 @@ class Config:
 
     CACHE_DURATION_MINUTES = 5
     ENABLE_DATA_CACHING    = True
+
+    # --- Lifecycle tracking (src/tracking) ---
+    DB_PATH               = 'data/tracking.db'
+    POLL_INTERVAL_SEC     = 60      # how often to poll the flight feed
+    OIL_REFRESH_SEC       = 900     # how often to refresh intraday oil prices
+    LANDING_TIMEOUT_MIN   = 15      # not seen for this long -> close event as signal_lost
+    TRACK_ONLY_MILITARY   = True    # only open events for is_military aircraft
+    OIL_INTRADAY_INTERVAL = '60m'   # yfinance interval for intraday oil bars
+    OIL_INTRADAY_PERIOD   = '5d'    # yfinance lookback per refresh
+    SNAPSHOT_SAMPLES      = 2       # quick polls per cycle, deduped by icao24
+    SNAPSHOT_RETRIES      = 4       # retries when the feed returns zero aircraft
+    SNAPSHOT_RETRY_WAIT   = 2       # seconds between retries
+    TRACKING_LOG_FILE     = 'logs/flight_tracker.log'
