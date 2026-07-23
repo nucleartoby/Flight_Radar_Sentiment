@@ -21,7 +21,7 @@ class FlightRadarCollector:
         password = Config.FR24_PASSWORD
 
     def get_flights_in_region(self, bounds: Dict[str, float]) -> List[Dict]:
-        bounds_str = (f"{bounds['south']},{bounds['north']}"
+        bounds_str = (f"{bounds['north']},{bounds['south']}"
             f",{bounds['west']},{bounds['east']}")
 
         raw = self._api.get_flights(bounds=bounds_str)
@@ -127,7 +127,6 @@ class FlightRadarCollector:
                     evidence.append(f'weak_gov_callsign:{token}(w={w})')
                     break
 
-        # ICAO country block doesnt mean military operator. AE/AF cover all US military registrations including trainers and contractor aircraft.
         icao_prefix = icao24[:2] if len(icao24) >= 2 else ''
         icao_w = Config.ICAO_BLOCK_WEIGHTS.get(icao_prefix, 0)
         if icao_w:
