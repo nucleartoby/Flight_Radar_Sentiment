@@ -3,6 +3,7 @@ import logging
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import xgboost as xgb
 from datetime import datetime
 from pathlib import Path
 
@@ -173,18 +174,17 @@ def train_and_evaluate(combined: pd.DataFrame, logger: logging.Logger):
     results = predictor.train_models(X, y, df)
 
     evaluator = ModelEvaluator()
-    for _, res in results.items():
-        metrics = evaluator.calculate_metrics(
-            y[int(len(y) * Config.TRAIN_TEST_SPLIT):],
-            res["model"].predict(
-                predictor.scaler.transform(X[int(len(X) * Config.TRAIN_TEST_SPLIT):])
-            ) if predictor.best_model_name != "xgboost" else
-            res["model"].predict(
-                __import__("xgboost").DMatrix(
-                    predictor.scaler.transform(X[int(len(X) * Config.TRAIN_TEST_SPLIT):])
-                )
-            ),
-        )
+    split = int(len(X) * Config.TRAIN_TEST_SPLIT)
+    X_test_scaled = predictor.scaler.transform(X[split:])
+    y_test = y[split:]
+
+    for name, res in results.items():
+        if name == "xgboost":
+            preds = res["model"].predict(xgb.DMatrix(X_test_scaled))
+        else:
+            preds = res["model"].predict(X_test_scaled)
+
+        metrics = evaluator.calculate_metrics(y_test, preds)
         evaluator.print_evaluation_report(metrics)
 
     model_path = f"models/oil_predictor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
