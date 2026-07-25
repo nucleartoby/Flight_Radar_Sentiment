@@ -20,18 +20,26 @@ class Config:
         'SAM',                   # Special Air Mission
         'CNV', 'CONVOY',
         'MAGIC',                 # AWACS
-        'ASCOT',                 # UK military air transport (RAF)
+        'ASCOT',                 # UK military air transport (RAF telephony)
+        'RRR',                   # RAF ICAO designator (telephony ASCOT)
+        'RFR',                   # RAF ICAO designator (telephony RAFAIR)
         'TARTAN',                # RAF Scotland QRA
-        'RRR',                   # RAF air-to-air refuelling tactical callsign
         'COTAM',                 # French Air Force transport command
         'FAF',                   # French Air Force
         'NATO',                  # NATO declared callsign
         'TUAF', 'TUF',           # Turkish Air Force
+        # USAF airlift/tanker tactical callsigns observed in the AOI
+        'MOOSE',                 # C-17 airlift
+        'CADDY',                 # US military light transport
+        'BLUE',                  # tanker/airlift tactical
+        'QID', 'QUID',           # KC-135 tactical
+        'ETHYL',                 # tanker tactical
+        'TABOR', 'CHROME',       # tanker tactical
     ]
 
     GOV_LOGISTICS_CALLSIGNS = [
         'CMB',                   # Camber
-        'RCH', 'REACH',          # Air Mobility Command
+        'RCH', 'REACH',          # Air Mobility Command (telephony REACH)
         'SHELL',                 # KC tanker tactical callsign
         'GOTHAM',                # ISR platform
         'VENUS', 'BART',         # ISR / surveillance
@@ -71,8 +79,12 @@ class Config:
         'AI', '6E', 'PK', 'ET',                      # Other major
     }
 
+    # strong_mil must be >= CONFIDENCE_THRESHOLDS['likely_military'] so that a
+    # confirmed military callsign is sufficient on its own. At the old value of
+    # 55 an RAF Voyager squawking RRR scored below the 65 threshold and fell
+    # through to 'unknown'.
     CALLSIGN_WEIGHTS = {
-        'strong_mil':    55,
+        'strong_mil':    70,
         'gov_logistics': 45,
         'weak_gov':      12,
     }
@@ -84,16 +96,17 @@ class Config:
         0:   8,
     }
 
-    ICAO_BLOCK_WEIGHTS = {
-        'AE': 12,
-        'AF': 12,
-        'A0': 8, 'A1': 8, 'A2': 8, 'A3': 8, 'A4': 8,
-        'A5': 8, 'A6': 8, 'A7': 8, 'A8': 8, 'A9': 8,
-        'AA': 8, 'AB': 8, 'AC': 8, 'AD': 8,
-        'AN': 8, 'AO': 8, 'AP': 8, 'AQ': 8, 'AR': 8,
-        'AS': 8, 'AT': 8, 'AU': 8, 'AV': 8, 'AW': 8,
-        'AX': 8, 'AY': 8, 'AZ': 8,
-    }
+    # Replaces the old ICAO_BLOCK_WEIGHTS 2-char prefix table, which was wrong in
+    # two ways: 'A0'-'AD' is the US *civil* block (a00001=N1 .. adf7c7=N99999, so
+    # it rewarded every US airliner in frame), and 'AN'-'AZ' contained non-hex
+    # characters that could never match. Full-range lookup now lives in
+    # src/data/mil_hex.py against the vendored config/mil_ranges.json.
+    #
+    # Weight is >= the likely_military threshold: a hit in a military allocation
+    # block is the single strongest indicator available in an ADS-B feed and is
+    # sufficient on its own. A miss is NOT evidence of civilian status -- see the
+    # spoofing note in src/data/mil_hex.py.
+    MIL_HEX_WEIGHT = 65
 
     BASE_TYPE_WEIGHTS = {
         'isr_hub':       20,
@@ -116,8 +129,6 @@ class Config:
     }
 
     MILITARY_CALLSIGNS = STRONG_MIL_CALLSIGNS + GOV_LOGISTICS_CALLSIGNS + WEAK_GOV_CALLSIGNS
-
-    MILITARY_ICAO_CODES = list(ICAO_BLOCK_WEIGHTS.keys())
 
     TRACKED_AIRCRAFT_TYPES = {
         # Tankers
@@ -183,3 +194,13 @@ class Config:
     SNAPSHOT_RETRIES      = 4       # retries when the feed returns zero aircraft
     SNAPSHOT_RETRY_WAIT   = 2       # seconds between retries
     TRACKING_LOG_FILE     = 'logs/flight_tracker.log'
+
+    # Bumped whenever classify_flight scoring changes. Stored on every row so a
+    # rescore never silently mixes regimes -- scores from different rulesets are
+    # not comparable and must not be pooled into one index series.
+    RULESET_VERSION = 2
+
+    # Record aircraft that failed the is_military filter but sit in a military
+    # ICAO allocation block. This is the false-negative set: without it, recall
+    # is unmeasurable because rejected aircraft leave no trace.
+    LOG_FALSE_NEGATIVES = True
