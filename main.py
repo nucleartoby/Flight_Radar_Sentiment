@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.data.flightradar_api import FlightRadarCollector
+from src.data.mil_hex import lookup as mil_hex_lookup
 from src.data.oil_price import OilPriceCollector
 from src.data.base_monitor import BaseMonitor
 from src.feature_engineering.features import FeatureEngineer
@@ -256,16 +257,14 @@ def _best_type_label(f: dict) -> tuple:
     category = f.get("category")
     cat_label = _CATEGORY_LABELS.get(category, "") if category is not None else ""
 
-    icao24 = (f.get("icao24") or "").upper()
-    prefix = icao24[:2] if len(icao24) >= 2 else ""
-    us_mil = prefix in Config.ICAO_BLOCK_WEIGHTS
+    block = mil_hex_lookup(f.get("icao24") or "")
 
-    if cat_label and us_mil:
-        return "?", f"US-Mil / {cat_label}"
+    if cat_label and block:
+        return "?", f"{block} mil / {cat_label}"
     if cat_label:
         return "?", cat_label
-    if us_mil:
-        return "?", "US Military block"
+    if block:
+        return "?", f"{block} military block"
     return "?", "---"
 
 
