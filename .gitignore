@@ -6,3 +6,5 @@ logs
 src/data/__pycache__
 src/feature_engineering/__pycache__
 src/model/__pycache__
+src/tracking/__pycache__
+/models
