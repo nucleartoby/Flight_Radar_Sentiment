@@ -42,7 +42,10 @@ class FlightTracker:
                 "heading": flight.get("heading"), "on_ground": int(cur_og),
                 "callsign": flight.get("callsign"),
                 "classification": flight.get("classification"),
-                "score": flight.get("classification_score"),})
+                "score": flight.get("classification_score"),
+                "evidence_flags": flight.get("evidence_flags"),
+                "mil_hex_block": flight.get("mil_hex_block"),
+                "ruleset_version": flight.get("ruleset_version"),})
 
             if icao in self.active:
                 event = self.active[icao]
@@ -112,6 +115,9 @@ class FlightTracker:
             "bz_price_start": db.price_asof(self.conn, "BZ=F", now),
             "cl_price_start": db.price_asof(self.conn, "CL=F", now),
             "bz_price_end": None, "cl_price_end": None,
+            "evidence_flags": flight.get("evidence_flags"),
+            "mil_hex_block": flight.get("mil_hex_block"),
+            "ruleset_version": flight.get("ruleset_version"),
             "status": "active",
             "updated_ts": now,}
         
