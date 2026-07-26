@@ -52,7 +52,7 @@ def main():
         cycle_start = time.time()
         now = int(cycle_start)
 
-        snapshot = collect_snapshot(collector, monitor)
+        snapshot = collect_snapshot(collector, monitor, conn=conn, now=now)
         counts = tracker.update(snapshot, now)
         logger.info(
             f"cycle: tracked={counts['tracked']} opened={counts['opened']} "
