@@ -13,10 +13,25 @@ EVENT_COLUMNS = [
     "dest_lat", "dest_lon", "dest_base", "dest_airport",
     "n_points", "max_alt_m", "min_alt_m", "max_speed", "path_distance_km", "bases_visited",
     "bz_price_start", "cl_price_start", "bz_price_end", "cl_price_end",
+    "evidence_flags", "mil_hex_block", "ruleset_version",
     "status", "updated_ts",]
 
+# Added after the initial schema shipped. Applied by _migrate() to existing DBs.
+_ADDED_COLUMNS = {
+    "positions": [
+        ("evidence_flags", "TEXT"),
+        ("mil_hex_block", "TEXT"),
+        ("ruleset_version", "INTEGER"),
+    ],
+    "flight_events": [
+        ("evidence_flags", "TEXT"),
+        ("mil_hex_block", "TEXT"),
+        ("ruleset_version", "INTEGER"),
+    ],
+}
 
-def connect(db_path: str = None) -> sqlite3.Connection:
+
+def connect(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = db_path or Config.DB_PATH
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
@@ -39,7 +54,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
             on_ground      INTEGER,
             callsign       TEXT,
             classification TEXT,
-            score          INTEGER
+            score          INTEGER,
+            evidence_flags  TEXT,
+            mil_hex_block   TEXT,
+            ruleset_version INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_positions_icao_ts ON positions(icao24, ts);
 
@@ -74,6 +92,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             cl_price_start   REAL,
             bz_price_end     REAL,
             cl_price_end     REAL,
+            evidence_flags   TEXT,
+            mil_hex_block    TEXT,
+            ruleset_version  INTEGER,
             status           TEXT    NOT NULL DEFAULT 'active',
             updated_ts       INTEGER
         );
@@ -91,9 +112,38 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (symbol, ts)
         );
         CREATE INDEX IF NOT EXISTS idx_oil_symbol_ts ON oil_prices_intraday(symbol, ts);
+
+        -- Aircraft rejected by the is_military filter that nonetheless sit in a
+        -- military ICAO allocation block. Without this the rejected set leaves no
+        -- trace and recall cannot be measured -- only precision.
+        CREATE TABLE IF NOT EXISTS rejected_mil_hex (
+            icao24          TEXT    NOT NULL,
+            ts              INTEGER NOT NULL,
+            callsign        TEXT,
+            aircraft_type   TEXT,
+            mil_hex_block   TEXT,
+            classification  TEXT,
+            score           INTEGER,
+            evidence_flags  TEXT,
+            ruleset_version INTEGER,
+            PRIMARY KEY (icao24, ts)
+        );
+        CREATE INDEX IF NOT EXISTS idx_rejected_ts ON rejected_mil_hex(ts);
         """
     )
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a DB was first created. ALTER TABLE ADD
+    COLUMN is cheap in SQLite and backfills NULL, which correctly marks rows
+    scored under an earlier ruleset as having no recorded evidence."""
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, coltype in columns:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")
 
 
 def insert_positions(conn: sqlite3.Connection, rows: List[Dict]) -> None:
@@ -101,9 +151,25 @@ def insert_positions(conn: sqlite3.Connection, rows: List[Dict]) -> None:
         return
     conn.executemany(
         """INSERT INTO positions
-           (icao24, ts, lat, lon, alt_m, speed, heading, on_ground, callsign, classification, score)
+           (icao24, ts, lat, lon, alt_m, speed, heading, on_ground, callsign,
+            classification, score, evidence_flags, mil_hex_block, ruleset_version)
            VALUES (:icao24, :ts, :lat, :lon, :alt_m, :speed, :heading, :on_ground,
-                   :callsign, :classification, :score)""",
+                   :callsign, :classification, :score, :evidence_flags,
+                   :mil_hex_block, :ruleset_version)""",
+        rows,)
+    conn.commit()
+
+
+def insert_rejected(conn: sqlite3.Connection, rows: List[Dict]) -> None:
+    """Record military-hex aircraft that the classifier declined to track."""
+    if not rows:
+        return
+    conn.executemany(
+        """INSERT OR IGNORE INTO rejected_mil_hex
+           (icao24, ts, callsign, aircraft_type, mil_hex_block,
+            classification, score, evidence_flags, ruleset_version)
+           VALUES (:icao24, :ts, :callsign, :aircraft_type, :mil_hex_block,
+                   :classification, :score, :evidence_flags, :ruleset_version)""",
         rows,)
     conn.commit()
 
