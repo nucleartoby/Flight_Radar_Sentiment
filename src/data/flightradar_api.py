@@ -4,6 +4,7 @@ from typing import List, Dict, Optional
 
 from FlightRadarAPI import FlightRadar24API
 from config.settings import Config
+from src.data.mil_hex import lookup as mil_hex_lookup
 
 
 _IATA_RE = re.compile(r'^[A-Z]{2,3}\d{2,4}$')
@@ -84,6 +85,8 @@ class FlightRadarCollector:
         has_gov_logistics = False
         has_strong = False
 
+        mil_block = mil_hex_lookup(icao24)
+
         type_info = Config.TRACKED_AIRCRAFT_TYPES.get(typecode)
         if type_info:
             boost = type_info['weight_boost']
@@ -127,11 +130,11 @@ class FlightRadarCollector:
                     evidence.append(f'weak_gov_callsign:{token}(w={w})')
                     break
 
-        icao_prefix = icao24[:2] if len(icao24) >= 2 else ''
-        icao_w = Config.ICAO_BLOCK_WEIGHTS.get(icao_prefix, 0)
-        if icao_w:
-            score += icao_w
-            evidence.append(f'icao_block:{icao_prefix}(weak,w={icao_w})')
+        if mil_block:
+            w = Config.MIL_HEX_WEIGHT
+            score += w
+            evidence.append(f'mil_hex_block:{mil_block}(w={w})')
+            has_strong = True
 
         # Base proximity contextual only
         if flight.get('near_base') and base_type:
@@ -152,21 +155,22 @@ class FlightRadarCollector:
             score += 10
             evidence.append('short_numeric_callsign')
 
-        # FR24 provides airline_iata directly stronger than prefix guessing
-        if airline_iata and airline_iata in Config.COMMERCIAL_AIRLINE_IATA:
-            neg = Config.NEGATIVE_WEIGHTS['commercial_prefix']
-            score += neg
-            evidence.append(f'commercial_airline:{airline_iata}(w={neg})')
+        if mil_block:
+            evidence.append('negatives_suppressed:mil_hex_block')
         else:
-            for prefix in Config.COMMERCIAL_CALLSIGN_PREFIXES:
-                if callsign.startswith(prefix):
-                    neg = Config.NEGATIVE_WEIGHTS['commercial_prefix']
-                    score += neg
-                    evidence.append(f'commercial_prefix:{prefix}(w={neg})')
-                    break
+            if airline_iata and airline_iata in Config.COMMERCIAL_AIRLINE_IATA:
+                neg = Config.NEGATIVE_WEIGHTS['commercial_prefix']
+                score += neg
+                evidence.append(f'commercial_airline:{airline_iata}(w={neg})')
+            else:
+                for prefix in Config.COMMERCIAL_CALLSIGN_PREFIXES:
+                    if callsign.startswith(prefix):
+                        neg = Config.NEGATIVE_WEIGHTS['commercial_prefix']
+                        score += neg
+                        evidence.append(f'commercial_prefix:{prefix}(w={neg})')
+                        break
 
-        if callsign and _IATA_RE.match(callsign):
-            if not any(t in callsign for t in Config.STRONG_MIL_CALLSIGNS):
+            if callsign and _IATA_RE.match(callsign) and not has_strong:
                 neg = Config.NEGATIVE_WEIGHTS['iata_format']
                 score += neg
                 evidence.append(f'iata_format(w={neg})')
@@ -194,12 +198,16 @@ class FlightRadarCollector:
             confidence_band = 'civilian'
 
         has_proximity = any('near_base' in e for e in evidence)
-        if score >= thr['likely_military'] and has_strong:
+        if mil_block:
+            verification_status = 'mil_hex_block'
+        elif score >= thr['likely_military'] and has_strong:
             verification_status = 'high_confidence_rule_match'
         elif has_proximity and len(evidence) > 1:
             verification_status = 'cross_source_candidate'
         else:
             verification_status = 'unverified'
+
+        is_military = classification in ('likely_military', 'gov_logistics')
 
         evidence_str = ' | '.join(evidence) if evidence else 'none'
         return {
@@ -209,7 +217,9 @@ class FlightRadarCollector:
             'evidence_flags': evidence_str,
             'verification_status': verification_status,
             'military_reason': evidence_str,
-            'is_military': classification in ('likely_military', 'gov_logistics', 'unknown'),}
+            'mil_hex_block': mil_block or '',
+            'ruleset_version': Config.RULESET_VERSION,
+            'is_military': is_military,}
 
     # Status
 
