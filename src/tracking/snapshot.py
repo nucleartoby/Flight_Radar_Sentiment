@@ -1,10 +1,8 @@
 import time
-import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from config.settings import Config
-
-logger = logging.getLogger("snapshot")
+from src.tracking import db
 
 
 def _enrich(flight: Dict, collector, monitor) -> Dict:
@@ -29,7 +27,8 @@ def _raw_poll(collector) -> List[Dict]:
     return []
 
 
-def collect_snapshot(collector, monitor) -> List[Dict]:
+def collect_snapshot(collector, monitor, conn=None,
+                     now: Optional[int] = None) -> List[Dict]:
     by_icao: Dict[str, Dict] = {}
 
     for sample in range(max(1, Config.SNAPSHOT_SAMPLES)):
@@ -43,8 +42,25 @@ def collect_snapshot(collector, monitor) -> List[Dict]:
 
     enriched = [_enrich(f, collector, monitor) for f in by_icao.values()]
 
+    rejected = []
     if Config.TRACK_ONLY_MILITARY:
-        enriched = [f for f in enriched if f.get("is_military")]
+        tracked = [f for f in enriched if f.get("is_military")]
+        rejected = [f for f in enriched
+                    if not f.get("is_military") and f.get("mil_hex_block")]
+        enriched = tracked
 
-    logger.info(f"Snapshot: {len(by_icao)} unique aircraft, {len(enriched)} tracked.")
+    if rejected and conn is not None and Config.LOG_FALSE_NEGATIVES:
+        ts = now if now is not None else int(time.time())
+        db.insert_rejected(conn, [{
+            "icao24": (f.get("icao24") or "").lower(),
+            "ts": ts,
+            "callsign": f.get("callsign"),
+            "aircraft_type": f.get("aircraft_type"),
+            "mil_hex_block": f.get("mil_hex_block"),
+            "classification": f.get("classification"),
+            "score": f.get("classification_score"),
+            "evidence_flags": f.get("evidence_flags"),
+            "ruleset_version": f.get("ruleset_version"),
+        } for f in rejected])
+
     return enriched
